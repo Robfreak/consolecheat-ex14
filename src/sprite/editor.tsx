@@ -17,7 +17,19 @@ import {
 } from "./frames.ts";
 import { canRedoSprite, canUndoSprite, commitSprite, createSpriteHistory, redoSprite, undoSprite, type SpriteHistory } from "./history.ts";
 import { DropperIcon, EraserIcon, FillIcon, PencilIcon } from "./icons.tsx";
-import { shortcutBlocked, spriteShortcutFromKey, type SpriteShortcut } from "./keys.ts";
+import {
+  centerCursor,
+  clampCursor,
+  connectedPads,
+  cursorKeyAction,
+  pollPads,
+  readNavigatorPads,
+  stepPad,
+  type Cursor,
+  type PadAction,
+  type PadMemory,
+} from "./gamepad.ts";
+import { isTypingTarget, shortcutBlocked, spriteShortcutFromKey, type SpriteShortcut } from "./keys.ts";
 import { fill, type Copy } from "./messages.ts";
 import {
   CANVAS_SIZES,
@@ -90,6 +102,9 @@ export function Editor({ text }: { text: Copy }) {
   const [live, setLive] = useState("");
   const [playing, setPlaying] = useState(false);
   const [cellSize, setCellSize] = useState<number>(initial.size);
+  const [cursor, setCursor] = useState<Cursor>(() => centerCursor(initial.size));
+  const [padName, setPadName] = useState<string | null>(null);
+  const [canvasFocused, setCanvasFocused] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -103,10 +118,12 @@ export function Editor({ text }: { text: Copy }) {
   const dirtyRef = useRef(false);
   const skipSaveRef = useRef(true);
   const confirmRef = useRef(false);
+  const cursorRef = useRef(cursor);
   historyRef.current = history;
   settingsRef.current = settings;
   textRef.current = text;
   confirmRef.current = confirmReset;
+  cursorRef.current = cursor;
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -308,6 +325,14 @@ export function Editor({ text }: { text: Copy }) {
         if (event.key === "Escape") setConfirmReset(false);
         return;
       }
+      if (event.target === canvasRef.current) {
+        const cursorAction = cursorKeyAction(event);
+        if (cursorAction) {
+          event.preventDefault();
+          if (!event.repeat || cursorAction.type === "move") runPadAction(cursorAction);
+          return;
+        }
+      }
       const action = spriteShortcutFromKey(event);
       if (!action) return;
       event.preventDefault();
@@ -315,6 +340,122 @@ export function Editor({ text }: { text: Copy }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** Shared by the gamepad and by the keyboard cursor on the focused canvas. */
+  function runPadAction(action: PadAction) {
+    if (confirmRef.current || strokeRef.current) return;
+    if (action.type === "undo") {
+      undoNow();
+      return;
+    }
+    if (action.type === "redo") {
+      redoNow();
+      return;
+    }
+    if (action.type === "play") {
+      togglePlay();
+      return;
+    }
+    const labels = textRef.current;
+    const prefs = settingsRef.current;
+    const before = historyRef.current;
+    const step = stepPad(
+      { snapshot: before.present, cursor: cursorRef.current, color: prefs.color, colors: paletteColors(prefs.palette) },
+      action,
+    );
+    if (step.effect === "none") return;
+    if (step.effect === "cursor") {
+      cursorRef.current = step.cursor;
+      setCursor(step.cursor);
+      return;
+    }
+    if (step.effect === "color") {
+      chooseColor(step.color);
+      setLive(fill(labels.announceColor, { color: step.color }));
+      return;
+    }
+    dirtyRef.current = true;
+    if (step.effect === "select") {
+      const next = { ...before, present: step.snapshot };
+      historyRef.current = next;
+      setHistory(next);
+      setLive(fill(labels.announceFrame, { n: step.snapshot.index + 1 }));
+      return;
+    }
+    const next = commitSprite(before, step.snapshot);
+    historyRef.current = next;
+    setHistory(next);
+    const spot = { x: step.cursor.x + 1, y: step.cursor.y + 1 };
+    setLive(fill(action.type === "paint" ? labels.announcePixelPainted : labels.announcePixelErased, spot));
+  }
+
+  useEffect(() => {
+    let raf = 0;
+    let memory = new Map<number, PadMemory>();
+
+    const stop = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      memory = new Map();
+    };
+
+    const loop = (now: number) => {
+      raf = 0;
+      if (document.hidden) return;
+      const pads = readNavigatorPads(navigator);
+      if (connectedPads(pads).length === 0) {
+        memory = new Map();
+        setPadName(null);
+        return;
+      }
+      const blocked = isTypingTarget(document.activeElement) || confirmRef.current;
+      const polled = pollPads(pads, memory, now, blocked);
+      memory = polled.memory;
+      for (const action of polled.actions) runPadAction(action);
+      raf = requestAnimationFrame(loop);
+    };
+
+    /** Polling only runs while the tab is visible and a pad is connected. A fresh start re-seeds held buttons. */
+    const start = (): string | null => {
+      const first = connectedPads(readNavigatorPads(navigator))[0];
+      if (!first) {
+        setPadName(null);
+        return null;
+      }
+      const name = first.id.slice(0, 60);
+      setPadName(name);
+      if (!raf && !document.hidden) {
+        memory = new Map();
+        raf = requestAnimationFrame(loop);
+      }
+      return name;
+    };
+
+    const onConnect = () => {
+      const had = raf !== 0;
+      const name = start();
+      if (name && !had) setLive(textRef.current.announceGamepadOn);
+    };
+    const onDisconnect = () => {
+      stop();
+      if (!start()) setLive(textRef.current.announceGamepadOff);
+    };
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else start();
+    };
+
+    start();
+    window.addEventListener("gamepadconnected", onConnect);
+    window.addEventListener("gamepaddisconnected", onDisconnect);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      window.removeEventListener("gamepadconnected", onConnect);
+      window.removeEventListener("gamepaddisconnected", onDisconnect);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   function undoNow() {
@@ -514,6 +655,7 @@ export function Editor({ text }: { text: Copy }) {
 
   const snap = history.present;
   const frame = snap.frames[snap.index];
+  const shownCursor = clampCursor(snap.size, cursor);
   const recent = settings.recent.filter((color) => color !== settings.color).slice(0, 8);
   const colors = paletteColors(settings.palette);
   const atCap = snap.frames.length >= MAX_FRAMES;
@@ -535,8 +677,26 @@ export function Editor({ text }: { text: Copy }) {
                 height={snap.size}
                 aria-label={fill(text.canvasLabel, { size: snap.size })}
                 style={{ touchAction: "none" }}
+                tabIndex={0}
+                onFocus={() => setCanvasFocused(true)}
+                onBlur={() => setCanvasFocused(false)}
               />
               {settings.grid ? <div className="pixel-grid" aria-hidden="true" /> : null}
+              {padName !== null || canvasFocused ? (
+                <div
+                  className="pad-cursor"
+                  data-testid="pad-cursor"
+                  data-x={shownCursor.x}
+                  data-y={shownCursor.y}
+                  aria-hidden="true"
+                  style={{
+                    left: `${(shownCursor.x / snap.size) * 100}%`,
+                    top: `${(shownCursor.y / snap.size) * 100}%`,
+                    width: `${100 / snap.size}%`,
+                    height: `${100 / snap.size}%`,
+                  }}
+                />
+              ) : null}
             </div>
           </div>
           <div className="flex flex-wrap gap-2" role="group" aria-label={text.sizeLabel}>
@@ -579,6 +739,14 @@ export function Editor({ text }: { text: Copy }) {
             </button>
           </div>
           <p className="text-sm text-muted">{fill(text.framePosition, { n: snap.index + 1, total: snap.frames.length })}</p>
+          <div className="panel rounded-xl p-3" data-testid="gamepad-hint">
+            <p className="text-sm font-semibold text-fg">{text.gamepadHeading}</p>
+            <p className="mt-1 text-sm text-muted" data-testid="pad-status">
+              {padName ? fill(text.gamepadOn, { name: padName }) : text.gamepadOff}
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{text.gamepadHint}</p>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{text.cursorKeysHint}</p>
+          </div>
         </div>
 
         <div className="panel flex flex-col gap-4 rounded-2xl p-4">
