@@ -105,6 +105,16 @@ export type Copy = {
   announceOnion: string;
   announceImport: string;
   announceAvatar: string;
+  gamepadHeading: string;
+  gamepadHint: string;
+  cursorKeysHint: string;
+  gamepadOn: string;
+  gamepadOff: string;
+  announceGamepadOn: string;
+  announceGamepadOff: string;
+  announcePixelPainted: string;
+  announcePixelErased: string;
+  announceColor: string;
   deleteAll: string;
   deleteAsk: string;
   deleteYes: string;
@@ -218,6 +228,18 @@ const de = pack({
   announceOnion: "Zwiebelschale umgeschaltet.",
   announceImport: "Bild importiert.",
   announceAvatar: "Avatar importiert.",
+  gamepadHeading: "Controller",
+  gamepadHint:
+    "Steuerkreuz oder linker Stick bewegt den Pixel-Cursor. × malt, ○ radiert, □ und △ wechseln die Farbe zurück und vor. L1 und R1 wechseln das Bild, L2 und R2 machen rückgängig und wiederholen, Options spielt oder stoppt die Vorschau.",
+  cursorKeysHint:
+    "Tastatur: Mit Tab auf die Zeichenfläche gehen, dann bewegen die Pfeiltasten den Cursor, Eingabe oder Leertaste malen, Entf oder Rücktaste radieren.",
+  gamepadOn: "Controller verbunden: {name}",
+  gamepadOff: "Kein Controller verbunden. Drücke eine Taste am Controller, damit er erkannt wird.",
+  announceGamepadOn: "Controller verbunden. Steuerkreuz bewegt den Cursor, × malt, ○ radiert.",
+  announceGamepadOff: "Controller getrennt.",
+  announcePixelPainted: "Pixel {x}, {y} gemalt.",
+  announcePixelErased: "Pixel {x}, {y} radiert.",
+  announceColor: "Farbe {color}.",
   deleteAll: "Entwurf zurücksetzen",
   deleteAsk:
     "Wirklich den Entwurf in diesem Browser löschen? Nur der Schlüssel consolecheat-sprite-v1. Sprache und Erscheinungsbild bleiben.",
@@ -326,6 +348,18 @@ const en = pack({
   announceOnion: "Onion skin toggled.",
   announceImport: "Image imported.",
   announceAvatar: "Avatar imported.",
+  gamepadHeading: "Controller",
+  gamepadHint:
+    "The D-pad or left stick moves the pixel cursor. × paints, ○ erases, □ and △ step the color back and forward. L1 and R1 switch the frame, L2 and R2 undo and redo, Options plays or stops the preview.",
+  cursorKeysHint:
+    "Keyboard: Tab to the drawing surface, then the arrow keys move the cursor, Enter or Space paints, Delete or Backspace erases.",
+  gamepadOn: "Controller connected: {name}",
+  gamepadOff: "No controller connected. Press a button on the controller so the browser sees it.",
+  announceGamepadOn: "Controller connected. The D-pad moves the cursor, × paints, ○ erases.",
+  announceGamepadOff: "Controller disconnected.",
+  announcePixelPainted: "Pixel {x}, {y} painted.",
+  announcePixelErased: "Pixel {x}, {y} erased.",
+  announceColor: "Color {color}.",
   deleteAll: "Reset draft",
   deleteAsk: "Really delete the draft in this browser? Only the key consolecheat-sprite-v1. Language and appearance stay.",
   deleteYes: "Delete only the draft",
